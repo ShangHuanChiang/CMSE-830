@@ -20,8 +20,8 @@ The ultimate goal of the project is to predict crop yields by analyzing and merg
      - **Yield_tons_per_hectare**: The total crop yield produced, measured in tons per hectare.
 
 2. **Dataset 2**: 
-   - Contains **20,000 entries** with features including:
-     - **Soil_Quality**: Soil quality index, ranging from 50 to 100.
+   - Contains **20,000 samples** with features including:
+     - **Soil_Quality**: Soil quality index, ranging from 50(low) to 100(high).
      - **Seed_Variety**: Binary indicator of seed variety, where 1 represents a high-yield variety.
      - **Fertilizer_Amount_kg_per_hectare**: The amount of fertilizer used in kilograms per hectare.
      - **Sunny_Days**: The number of sunny days during the growing season.
