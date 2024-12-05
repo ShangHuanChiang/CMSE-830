@@ -1,4 +1,4 @@
-Area,year,tonnes_of_active_ingredients,Item,yield,average_rain_fall_mm_per_year,avg_temp
+Area,year,tonnes_of_active_ingredients,Crops,yield,average_rain_fall_mm_per_year,avg_temp
 Albania,1990,121.0,Maize,36613,1485.0,16.37
 Albania,1990,121.0,Potatoes,66667,1485.0,16.37
 Albania,1990,121.0,"Rice, paddy",23333,1485.0,16.37
