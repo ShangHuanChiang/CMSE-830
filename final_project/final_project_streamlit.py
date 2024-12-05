@@ -10,26 +10,106 @@ from io import BytesIO
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from statsmodels.tsa.arima.model import ARIMA
-from scipy.interpolate import RBFInterpolator
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.experimental import enable_iterative_imputer
+from sklearn.impute import IterativeImputer
+import matplotlib.ticker as mticker
 import logging
 
-# Configure logging
+# Configure logging and page
 logging.basicConfig(level=logging.ERROR)
+st.set_page_config(page_title="CropInsight", page_icon="🌾", layout="wide", initial_sidebar_state="expanded")
 
-# Page configuration
-st.set_page_config(
-    page_title="CropInsight",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# Constants
+DATASET_DESCRIPTIONS = [
+    """
+    <div style='margin-left: 20px;'>
+        <p><strong>Comprehensive dataset combining information from all sources:</strong></p>
+        <ul style='list-style-type: disc; margin-left: 20px;'>
+            <li><strong>Crops:</strong> Rice, Wheat, Maize, Soybeans</li>
+            <li><strong>Time Period:</strong> 1990-2013</li>
+            <li><strong>Variables:</strong>
+                <ul style='list-style-type: circle; margin-left: 20px;'>
+                    <li>Yield measurements</li>
+                    <li>Pesticide usage</li>
+                    <li>Temperature data</li>
+                    <li>Rainfall information</li>
+                </ul>
+            </li>
+            <li><strong>Regions:</strong> Multiple countries and regions</li>
+        </ul>
+    </div>
+    """,
+    """
+    <div style='margin-left: 20px;'>
+        <p><strong>Contains crop yield data for different regions:</strong></p>
+        <ul style='list-style-type: disc; margin-left: 20px;'>
+            <li><strong>Key Features:</strong>
+                <ul style='list-style-type: circle; margin-left: 20px;'>
+                    <li>Crop types and their yields</li>
+                    <li>Annual yield measurements</li>
+                    <li>Regional yield variations</li>
+                </ul>
+            </li>
+            <li><strong>Units:</strong> Tonnes per hectare</li>
+            <li><strong>Geographical Coverage:</strong> Multiple regions</li>
+        </ul>
+    </div>
+    """,
+    """
+    <div style='margin-left: 20px;'>
+        <p><strong>Information about pesticide usage:</strong></p>
+        <ul style='list-style-type: disc; margin-left: 20px;'>
+            <li><strong>Measurements:</strong>
+                <ul style='list-style-type: circle; margin-left: 20px;'>
+                    <li>Pesticide application rates</li>
+                    <li>Types of pesticides</li>
+                    <li>Regional usage patterns</li>
+                </ul>
+            </li>
+            <li><strong>Units:</strong> Tonnes of active ingredients</li>
+            <li><strong>Time Scale:</strong> Annual data</li>
+        </ul>
+    </div>
+    """,
+    """
+    <div style='margin-left: 20px;'>
+        <p><strong>Regional temperature records:</strong></p>
+        <ul style='list-style-type: disc; margin-left: 20px;'>
+            <li><strong>Measurements:</strong>
+                <ul style='list-style-type: circle; margin-left: 20px;'>
+                    <li>Average temperatures</li>
+                    <li>Regional variations</li>
+                    <li>Temporal patterns</li>
+                </ul>
+            </li>
+            <li><strong>Units:</strong> Degrees Celsius</li>
+            <li><strong>Temporal Resolution:</strong> Annual averages</li>
+        </ul>
+    </div>
+    """,
+    """
+    <div style='margin-left: 20px;'>
+        <p><strong>Precipitation data across regions:</strong></p>
+        <ul style='list-style-type: disc; margin-left: 20px;'>
+            <li><strong>Measurements:</strong>
+                <ul style='list-style-type: circle; margin-left: 20px;'>
+                    <li>Annual rainfall amounts</li>
+                    <li>Regional precipitation patterns</li>
+                    <li>Seasonal variations</li>
+                </ul>
+            </li>
+            <li><strong>Units:</strong> Millimeters per year</li>
+            <li><strong>Coverage:</strong> Regional rainfall data</li>
+        </ul>
+    </div>
+    """
+]
 
 # Cache data loading
 @st.cache_data
 def load_data():
-    """Load all datasets with caching and drop specified columns"""
     base_url = "https://raw.githubusercontent.com/ShangHuanChiang/CMSE-830/main/final_project/"
     datasets = {
         "agricultural": "agricultural_dataset.csv",
@@ -41,27 +121,23 @@ def load_data():
     data = {}
     for key, file in datasets.items():
         df = pd.read_csv(f"{base_url}{file}")
-        # Drop specified columns
         if key == 'yield':
-            df = df.drop(columns=["Domain Code", "Domain", "Area Code", "Element Code",
-                                  "Item Code", "Element", "Year Code", "Unit"], errors='ignore')
-            # Rename 'Year' to 'year' and 'Item' to 'Crops'
-            df.rename(columns={'Year': 'year', 'Item': 'Crops'}, inplace=True)
+            df = df.drop(columns=["Domain Code", "Domain", "Area Code", "Element Code", "Item Code", "Element", "Year Code", "Unit"], errors='ignore')
+            df.rename(columns={'Year': 'year', 'Item': 'Crops', 'Value': 'yield'}, inplace=True)
         elif key == 'pesticides':
             df = df.drop(columns=["Domain", "Item", "Element", "Unit"], errors='ignore')
             df.rename(columns={'Year': 'year'}, inplace=True)
+            # Keep 'Value' column as is in 'pesticides' dataset
         else:
             df.rename(columns={'Year': 'year'}, inplace=True)
         data[key] = df
     return data
 
 def load_and_process_bg_image():
-    """Load and process background image with proper handling for text visibility"""
     try:
         response = requests.get("https://img.freepik.com/free-photo/detail-rice-plant-sunset-valencia-with-plantation-out-focus-rice-grains-plant-seed_181624-25838.jpg")
         image = Image.open(BytesIO(response.content))
         image = image.resize((1920, 1080))
-
         buffered = BytesIO()
         image.save(buffered, format="JPEG", quality=90)
         return base64.b64encode(buffered.getvalue()).decode()
@@ -70,7 +146,6 @@ def load_and_process_bg_image():
         return None
 
 def apply_styling(img_str):
-    """Apply enhanced styling with background image"""
     background_style = f"""
         background-image: url("data:image/jpg;base64,{img_str}");
         background-size: cover;
@@ -84,8 +159,8 @@ def apply_styling(img_str):
         .stApp {{
             {background_style}
         }}
-        /* Additional custom styles */
-        /* Main container */
+        
+        /* Base styles */
         .stApp::before {{
             content: "";
             position: fixed;
@@ -97,7 +172,7 @@ def apply_styling(img_str):
             z-index: -1;
         }}
 
-        /* Text areas and sections */
+        /* Component containers */
         .text-area {{
             background: rgba(255, 255, 255, 0.9);
             padding: 2rem;
@@ -113,40 +188,28 @@ def apply_styling(img_str):
             border-radius: 8px;
         }}
 
-        /* Typography styles */
-        h1, h2, h3, p, li, label, .stRadio label {{
-            font-family: Arial, sans-serif;
-            text-shadow:
-                -1px -1px 0 #FFFFFF,
-                1px -1px 0 #FFFFFF,
-                -1px 1px 0 #FFFFFF,
-                1px 1px 0 #FFFFFF;
-            background: rgba(255, 255, 255, 0.9);
-            padding: 0.5rem;
-            border-radius: 8px;
-            display: inline-block;
-        }}
-
-        /* Additional padding for headers */
-        h1 {{
-            font-size: 3rem;
+        /* Typography */
+        h1, h2, h3 {{
             color: #2C3E50;
             font-weight: bold;
-            margin-bottom: 2rem;
+            margin-bottom: 1rem;
+        }}
+
+        h1 {{
+            font-size: 3rem;
+            font-family: "Georgia", serif;
+            text-align: center;
         }}
 
         h2 {{
             font-size: 2.2rem;
-            color: #34495E;
-            font-weight: 600;
-            margin: 1.5rem 0;
+            color: #2980B9;
+            text-align: center;
         }}
 
         h3 {{
             font-size: 1.8rem;
             color: #2980B9;
-            font-weight: 600;
-            margin: 1rem 0;
         }}
 
         p {{
@@ -156,6 +219,7 @@ def apply_styling(img_str):
             margin-bottom: 1rem;
         }}
 
+        /* Lists */
         ul {{
             list-style-position: inside;
             padding-left: 1rem;
@@ -167,55 +231,108 @@ def apply_styling(img_str):
             color: #2C3E50;
         }}
 
-        /* Get Started section */
-        .get-started-section {{
-            background: linear-gradient(135deg, #2980B9, #3498DB);
-            color: white;
-            padding: 3rem;
-            border-radius: 10px;
-            text-align: center;
-            margin: 3rem 0;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        /* Input elements */
+        div[data-baseweb="select"],
+        .stSelectbox select {{
+            background-color: white;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            padding: 2px;
         }}
 
-        .get-started-section h2,
-        .get-started-section p {{
-            color: white;
+        .stSelectbox label {{
+            color: #2C3E50;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 5px;
         }}
+
+        /* Tabs */
+        div[data-testid="stHorizontalBlock"] > div:first-child {{
+            background-color: rgba(255, 255, 255, 0.9);
+            border-radius: 10px;
+            padding: 5px;
+        }}
+
+        div[data-testid="stHorizontalBlock"] button {{
+            background-color: rgba(255, 255, 255, 0.9);
+            color: #2C3E50;
+            border: none;
+            border-radius: 5px;
+            margin-right: 5px;
+            padding: 10px;
+            font-weight: bold;
+        }}
+
+        div[data-testid="stHorizontalBlock"] button:hover,
+        div[data-testid="stHorizontalBlock"] button:focus,
+        div[data-testid="stHorizontalBlock"] button[aria-selected="true"] {{
+            background-color: #2980B9;
+            color: white;
+            outline: none;
+        }}
+
         </style>
     """, unsafe_allow_html=True)
 
-def show_homepage():
-    """Display homepage with dataset information"""
+def add_chart_usage_instructions():
     st.markdown("""
-        <div class='centered-title'>
-            <h1 style='color: #2C3E50; font-family: "Georgia", serif;'>🌾 CropInsight: Enhancing Agricultural Productivity</h1>
+        <div style='
+            background-color: #f0f2f6; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin: 30px 0; 
+            text-align: center; 
+            border: 2px solid #1f77b4;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        '>
+            <p style='
+                margin: 0; 
+                color: #1f77b4; 
+                font-weight: bold;
+                font-size: 1.2rem;
+                letter-spacing: 0.5px;
+            '>
+                📊 <span style='text-decoration: underline;'>Chart Usage:</span> 
+                Click on a legend item to hide it; double-click to isolate it
+            </p>
         </div>
+    """, unsafe_allow_html=True)
 
+def show_homepage(datasets):
+    st.markdown("""
         <div class='text-area'>
-            <h2 style='text-align: center; color: #2980B9;'>Welcome to CropInsight</h2>
-            <p style='text-align: center; font-size: 1.2rem;'>
+            <h1>🌾 CropInsight: Enhancing Agricultural Productivity</h1>
+        </div>
+        <div class='text-area'>
+            <h2>Welcome to CropInsight</h2>
+            <p>
             CropInsight aims to enhance agricultural productivity by providing tools that analyze how various factors affect crop yields.
             This platform is tailored for agricultural professionals, data scientists, policymakers, and researchers seeking to make informed decisions based on data-driven insights.
             </p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Add Understanding CropInsight section
     create_understanding_section()
+    show_dataset_information(datasets)
 
-    # Add dataset information
-    show_dataset_information()        
-
-def create_understanding_section():
-    """Create the 'Understanding CropInsight' section"""
     st.markdown("""
-        <div class='section-header'>
-            <h2 style='text-align: center; color: #2980B9;'>Understanding CropInsight</h2>
+        <div class='text-area'>
+            <h2>Let's Explore Together!</h2>
+            <p style='font-size:0.9rem;'>
+            Please note that due to the size of the datasets, some analyses may take longer to update.
+            We appreciate your patience as we work to provide you with insightful results.
+            </p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Content mapping
+def create_understanding_section():
+    st.markdown("""
+        <div class='text-area'>
+            <h2>Understanding CropInsight</h2>
+        </div>
+    """, unsafe_allow_html=True)
+
     content = {
         "Why": "To improve agricultural productivity by understanding how various factors affect crop yields.",
         "Who": "Agricultural professionals, data scientists, policymakers, and researchers.",
@@ -225,207 +342,69 @@ def create_understanding_section():
         "How": "By combining historical data analysis with advanced visualization techniques and predictive modeling."
     }
 
-    # Display all content
     for key, value in content.items():
         st.markdown(f"""
             <div class='info-card'>
-                <h3 style='color: #2980B9;'>{key}</h3>
+                <h3>{key}</h3>
                 <p>{value}</p>
             </div>
         """, unsafe_allow_html=True)
 
-def show_dataset_information():
-    """Display detailed information about available datasets"""
+def show_dataset_information(datasets):
     st.markdown("""
-        <div class='section-header'>
-            <h2 style='text-align: center;'>Available Datasets</h2>
+        <div class='text-area'>
+            <h2>Available Datasets</h2>
         </div>
     """, unsafe_allow_html=True)
 
-    # Create tabs for different datasets
     dataset_tabs = st.tabs([
-        "Agricultural Dataset", 
-        "Yield Dataset", 
+        "Agricultural Dataset",
+        "Yield Dataset",
         "Pesticides Dataset",
-        "Temperature Dataset", 
+        "Temperature Dataset",
         "Rainfall Dataset"
     ])
 
-    with dataset_tabs[0]:
-        st.markdown("""
-            <div class='text-area'>
-                <h3>Agricultural Dataset (Integrated)</h3>
-                <p>Comprehensive dataset combining information from all sources:</p>
-                <ul>
-                    <li><strong>Crops:</strong> Rice, Wheat, Maize, Soybeans</li>
-                    <li><strong>Time Period:</strong> 1990-2013</li>
-                    <li><strong>Variables:</strong>
-                        <ul>
-                            <li>Yield measurements</li>
-                            <li>Pesticide usage</li>
-                            <li>Temperature data</li>
-                            <li>Rainfall information</li>
-                        </ul>
-                    </li>
-                    <li><strong>Regions:</strong> Multiple countries and regions</li>
-                </ul>
-            </div>
-        """, unsafe_allow_html=True)
+    datasets_list = ['agricultural', 'yield', 'pesticides', 'temp', 'rainfall']
+    titles = [
+        "Agricultural Dataset (Integrated)",
+        "Yield Dataset",
+        "Pesticides Dataset",
+        "Temperature Dataset",
+        "Rainfall Dataset"
+    ]
 
-        # Show sample data
-        if st.checkbox("Show Agricultural Dataset Sample"):
-            st.dataframe(datasets['agricultural'].head())
+    for idx, tab in enumerate(dataset_tabs):
+        with tab:
+            st.markdown(f"""
+                <div class='text-area'>
+                    <h3>{titles[idx]}</h3>
+                    {DATASET_DESCRIPTIONS[idx]}
+                </div>
+            """, unsafe_allow_html=True)
+            
+            df = datasets[datasets_list[idx]]
+            st.markdown(f"""
+                <div style='text-align: center;'>
+                    <h4>{titles[idx]} Data Preview</h4>
+                </div>
+            """, unsafe_allow_html=True)
+            st.markdown("<div class='dataframe-container'>", unsafe_allow_html=True)
+            st.dataframe(df.head(10))
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    with dataset_tabs[1]:
-        st.markdown("""
-            <div class='text-area'>
-                <h3>Yield Dataset</h3>
-                <p>Contains crop yield data for different regions:</p>
-                <ul>
-                    <li><strong>Key Features:</strong>
-                        <ul>
-                            <li>Crop types and their yields</li>
-                            <li>Annual yield measurements</li>
-                            <li>Regional yield variations</li>
-                        </ul>
-                    </li>
-                    <li><strong>Units:</strong> Tonnes per hectare</li>
-                    <li><strong>Geographical Coverage:</strong> Multiple regions</li>
-                </ul>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.checkbox("Show Yield Dataset Sample"):
-            st.dataframe(datasets['yield'].head())
-
-    with dataset_tabs[2]:
-        st.markdown("""
-            <div class='text-area'>
-                <h3>Pesticides Dataset</h3>
-                <p>Information about pesticide usage:</p>
-                <ul>
-                    <li><strong>Measurements:</strong>
-                        <ul>
-                            <li>Pesticide application rates</li>
-                            <li>Types of pesticides</li>
-                            <li>Regional usage patterns</li>
-                        </ul>
-                    </li>
-                    <li><strong>Units:</strong> Tonnes of active ingredients</li>
-                    <li><strong>Time Scale:</strong> Annual data</li>
-                </ul>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.checkbox("Show Pesticides Dataset Sample"):
-            st.dataframe(datasets['pesticides'].head())
-
-    with dataset_tabs[3]:
-        st.markdown("""
-            <div class='text-area'>
-                <h3>Temperature Dataset</h3>
-                <p>Regional temperature records:</p>
-                <ul>
-                    <li><strong>Measurements:</strong>
-                        <ul>
-                            <li>Average temperatures</li>
-                            <li>Regional variations</li>
-                            <li>Temporal patterns</li>
-                        </ul>
-                    </li>
-                    <li><strong>Units:</strong> Degrees Celsius</li>
-                    <li><strong>Temporal Resolution:</strong> Annual averages</li>
-                </ul>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.checkbox("Show Temperature Dataset Sample"):
-            st.dataframe(datasets['temp'].head())
-
-    with dataset_tabs[4]:
-        st.markdown("""
-            <div class='text-area'>
-                <h3>Rainfall Dataset</h3>
-                <p>Precipitation data across regions:</p>
-                <ul>
-                    <li><strong>Measurements:</strong>
-                        <ul>
-                            <li>Annual rainfall amounts</li>
-                            <li>Regional precipitation patterns</li>
-                            <li>Seasonal variations</li>
-                        </ul>
-                    </li>
-                    <li><strong>Units:</strong> Millimeters per year</li>
-                    <li><strong>Coverage:</strong> Regional rainfall data</li>
-                </ul>
-            </div>
-        """, unsafe_allow_html=True)
-
-        if st.checkbox("Show Rainfall Dataset Sample"):
-            st.dataframe(datasets['rainfall'].head())
-
-# Update show_homepage function to include dataset information
-def show_homepage():
-    """Display homepage with dataset information"""
-    st.markdown("""
-        <div class='centered-title'>
-            <h1 style='color: #2C3E50; font-family: "Georgia", serif;'>🌾 CropInsight: Enhancing Agricultural Productivity</h1>
-        </div>
-
-        <div class='text-area'>
-            <h2 style='text-align: center; color: #2980B9;'>Welcome to CropInsight</h2>
-            <p style='text-align: center; font-size: 1.2rem;'>
-            CropInsight aims to enhance agricultural productivity by providing tools that analyze how various factors affect crop yields.
-            This platform is tailored for agricultural professionals, data scientists, policymakers, and researchers seeking to make informed decisions based on data-driven insights.
-            </p>
-        </div>
-    """, unsafe_allow_html=True)
-
-    # Add Understanding CropInsight section
-    create_understanding_section()
-
-    # Add dataset information
-    show_dataset_information()        
-
-def customer_analysis(datasets):
-    """Customer Analysis Dashboard"""
-    st.title("Customer Analysis Dashboard")
-
-    # Create tabs for different analyses
-    tabs = st.tabs([
-        "Custom Visualization",
-        "Correlation Analysis",
-        "Geographic Analysis",
-        "PCA Analysis",
-        "ARIMA Forecast",
-        "RBF-NN Interpolation"
-    ])
-
-    agricultural_data = datasets['agricultural']
-
-    with tabs[0]:
-        create_customer_visualization(agricultural_data)
-
-    with tabs[1]:
-        create_correlation_heatmap(agricultural_data)
-
-    with tabs[2]:
-        create_geographic_time_series(agricultural_data)
-
-    with tabs[3]:
-        create_pca_analysis(agricultural_data)
-
-    with tabs[4]:
-        create_arima_forecast(agricultural_data)
-
-    with tabs[5]:
-        create_rbf_interpolation(agricultural_data)
+def create_visualization_plot(df, x_axis, y_axis, color_by=None, title=None):
+    """Common function for creating visualization plots"""
+    fig = px.scatter(df, 
+                    x=x_axis, 
+                    y=y_axis, 
+                    color=df[color_by] if color_by else None,
+                    title=title)
+    st.plotly_chart(fig, use_container_width=True)
+    add_chart_usage_instructions()
 
 def create_customer_visualization(df):
-    """Create customizable visualizations for customers"""
     st.subheader("Scatter Plot")
-
-    # Rename 'Item' to 'Crops'
     df = df.rename(columns={'Item': 'Crops'})
 
     col1, col2 = st.columns(2)
@@ -434,30 +413,20 @@ def create_customer_visualization(df):
     with col2:
         y_axis = st.selectbox("Select Y-axis", df.select_dtypes(include=[np.number]).columns)
 
-    color_by = st.selectbox("Color by", ['Crops', 'Area'])
-
-    fig = px.scatter(df, x=x_axis, y=y_axis, color=df[color_by],
-                     title=f"{y_axis} vs {x_axis} by {color_by}",
-                     color_continuous_scale=px.colors.sequential.Viridis)  # Use a color scale without white background
-    st.plotly_chart(fig, use_container_width=True)
+    color_by = st.selectbox("Select Color By", ['Crops', 'Area'])
+    
+    create_visualization_plot(df, x_axis, y_axis, color_by, f"{y_axis} vs {x_axis} by {color_by}")
 
 def create_correlation_heatmap(df):
-    """Create correlation heatmap for different crops with correlation coefficients displayed"""
     st.subheader("Correlation Analysis")
-
-    # Rename 'Item' to 'Crops'
     df = df.rename(columns={'Item': 'Crops'})
 
     selected_crop = st.selectbox("Select Crop", ['All'] + list(df['Crops'].unique()))
-    if selected_crop != 'All':
-        crop_data = df[df['Crops'] == selected_crop]
-    else:
-        crop_data = df
+    crop_data = df[df['Crops'] == selected_crop] if selected_crop != 'All' else df
 
     numeric_cols = crop_data.select_dtypes(include=[np.number]).columns
     corr_matrix = crop_data[numeric_cols].corr()
 
-    # Use plotly.graph_objects to include annotations
     fig = go.Figure(data=go.Heatmap(
         z=corr_matrix.values,
         x=corr_matrix.columns,
@@ -483,12 +452,10 @@ def create_correlation_heatmap(df):
     )
 
     st.plotly_chart(fig, use_container_width=True)
+    # No chart usage instructions here
 
 def create_geographic_time_series(df):
-    """Create geographic visualization with time slider"""
     st.subheader("Geographic Analysis")
-
-    # Rename 'Item' to 'Crops'
     df = df.rename(columns={'Item': 'Crops'})
 
     year = st.slider("Select Year",
@@ -496,33 +463,24 @@ def create_geographic_time_series(df):
                      max_value=int(df['year'].max()))
 
     selected_crop = st.selectbox("Select Crop for Map", df['Crops'].unique())
-
     year_data = df[(df['year'] == year) & (df['Crops'] == selected_crop)]
 
     fig = px.scatter_geo(year_data,
-                         locations="Area",
-                         locationmode="country names",
-                         color="yield",
-                         hover_name="Area",
-                         size="yield",
-                         title=f"{selected_crop} Yield by Region ({year})")
+                        locations="Area",
+                        locationmode="country names",
+                        color="yield",
+                        hover_name="Area",
+                        size="yield",
+                        title=f"{selected_crop} Yield by Region ({year})")
     st.plotly_chart(fig, use_container_width=True)
+    # No chart usage instructions here
 
 def create_pca_analysis(df):
-    """Create PCA visualization with option to select individual crops and separate vector plot"""
     st.subheader("PCA Analysis")
-
-    # Rename 'Item' to 'Crops'
     df = df.rename(columns={'Item': 'Crops'})
 
-    # User selects crop
-    crop_options = ['All'] + list(df['Crops'].unique())
-    selected_crop = st.selectbox("Select Crop for PCA", crop_options)
-
-    if selected_crop != 'All':
-        df_pca = df[df['Crops'] == selected_crop]
-    else:
-        df_pca = df
+    selected_crop = st.selectbox("Select Crop for PCA", ['All'] + list(df['Crops'].unique()))
+    df_pca = df[df['Crops'] == selected_crop] if selected_crop != 'All' else df
 
     numeric_cols = df_pca.select_dtypes(include=[np.number]).columns
     X = StandardScaler().fit_transform(df_pca[numeric_cols])
@@ -530,27 +488,18 @@ def create_pca_analysis(df):
     pca = PCA(n_components=2)
     components = pca.fit_transform(X)
 
-    # Remove vectors from the PCA plot
     fig = px.scatter(x=components[:, 0], y=components[:, 1],
-                     color=df_pca['Area'],
-                     title=f"PCA Analysis for {selected_crop}",
-                     labels={'x': 'PC1 (Principal Component 1)', 'y': 'PC2 (Principal Component 2)'})
+                    color=df_pca['Area'],
+                    title=f"PCA Analysis for {selected_crop}",
+                    labels={
+                        'x': f"PC1 ({pca.explained_variance_ratio_[0]*100:.2f}% variance)",
+                        'y': f"PC2 ({pca.explained_variance_ratio_[1]*100:.2f}% variance)"
+                    })
     st.plotly_chart(fig, use_container_width=True)
-
-    # Add explanation for explained variance
-    st.markdown(f"""
-        <div class='text-area'>
-            <h4>Explained Variance:</h4>
-            <p>PC1 explains {pca.explained_variance_ratio_[0]:.2%} of the variance.</p>
-            <p>PC2 explains {pca.explained_variance_ratio_[1]:.2%} of the variance.</p>
-        </div>
-    """, unsafe_allow_html=True)
+    add_chart_usage_instructions()
 
 def create_arima_forecast(df):
-    """Create ARIMA forecast with training and testing data in different colors"""
     st.subheader("ARIMA Forecast")
-
-    # Rename 'Item' to 'Crops'
     df = df.rename(columns={'Item': 'Crops'})
 
     selected_crop = st.selectbox("Select Crop for Forecast", df['Crops'].unique())
@@ -558,148 +507,157 @@ def create_arima_forecast(df):
     test_size = st.slider("Select Test Data Size", 1, 10, 5)
 
     crop_data = df[df['Crops'] == selected_crop]['yield'].values
-
-    # Split data into training and testing
-    train_data = crop_data[:-test_size]
-    test_data = crop_data[-test_size:]
+    train_data, test_data = crop_data[:-test_size], crop_data[-test_size:]
 
     model = ARIMA(train_data, order=(p_value,1,1))
     results = model.fit()
-
     forecast = results.forecast(steps=test_size)
 
-    # Plot training and testing data
+    # Training and testing data plot
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=train_data, name="Training Data", mode='lines'))
-    fig.add_trace(go.Scatter(x=np.arange(len(train_data), len(train_data) + len(test_data)), y=test_data, name="Testing Data", mode='lines'))
+    fig.add_trace(go.Scatter(x=np.arange(len(train_data), len(train_data) + len(test_data)), 
+                            y=test_data, name="Testing Data", mode='lines'))
     fig.update_layout(title=f"Training and Testing Data for {selected_crop}",
-                      xaxis_title='Time',
-                      yaxis_title='Yield')
+                     xaxis_title='Time',
+                     yaxis_title='Yield')
     st.plotly_chart(fig, use_container_width=True)
+    add_chart_usage_instructions()
 
-    # Plot forecast vs testing data
+    # Forecast plot
     fig_forecast = go.Figure()
     fig_forecast.add_trace(go.Scatter(y=test_data, name="Actual Testing Data", mode='lines'))
     fig_forecast.add_trace(go.Scatter(y=forecast, name="Forecast", mode='lines'))
     fig_forecast.update_layout(title=f"Forecast vs Actual Testing Data for {selected_crop}",
-                               xaxis_title='Time',
-                               yaxis_title='Yield')
+                             xaxis_title='Time',
+                             yaxis_title='Yield')
     st.plotly_chart(fig_forecast, use_container_width=True)
+    add_chart_usage_instructions()
 
-def create_rbf_interpolation(df):
-    """Create RBF interpolation with adjustable parameters and both 2D and 3D plots"""
-    st.subheader("RBF-NN Interpolation")
-
-    # Rename 'Item' to 'Crops'
-    df = df.rename(columns={'Item': 'Crops'})
-
-    selected_crop = st.selectbox("Select Crop for Interpolation", df['Crops'].unique())
-    rbf_function = st.selectbox("Select RBF Function",
-                               ['thin_plate_spline', 'multiquadric', 'gaussian'],
-                               index=0)
-    epsilon = st.slider("Select epsilon parameter", 0.1, 10.0, 1.0, 0.1)
-
-    crop_data = df[df['Crops'] == selected_crop]
-    X = crop_data[['year', 'average_rain_fall_mm_per_year']].values
-    y = crop_data['yield'].values
-
-    # Create and fit RBF interpolator
-    rbf = RBFInterpolator(X, y,
-                          kernel=rbf_function,
-                          epsilon=epsilon)
-
-    # Create grid for prediction
-    xi = np.linspace(X[:, 0].min(), X[:, 0].max(), 100)
-    yi = np.linspace(X[:, 1].min(), X[:, 1].max(), 100)
-    xi, yi = np.meshgrid(xi, yi)
-    grid_points = np.vstack([xi.ravel(), yi.ravel()]).T
-
-    # Perform interpolation
-    zi = rbf(grid_points).reshape(xi.shape)
-
-    # Create 3D surface plot
-    fig_3d = go.Figure(data=[
-        go.Surface(x=xi, y=yi, z=zi)
-    ])
-
-    fig_3d.update_layout(
-        title=f"3D RBF Interpolation for {selected_crop}",
-        scene=dict(
-            xaxis_title="Year",
-            yaxis_title="Rainfall (mm)",
-            zaxis_title="Yield"
-        ),
-        width=800,
-        height=800
-    )
-
-    st.plotly_chart(fig_3d, use_container_width=True)
-
-    # Create 2D contour plot
-    fig_2d = go.Figure(data=
-        go.Contour(
-            x=xi[0],
-            y=yi[:,0],
-            z=zi,
-            contours_coloring='heatmap',
-            colorbar=dict(title='Yield')
-        )
-    )
-    fig_2d.update_layout(
-        title=f"2D RBF Interpolation for {selected_crop}",
-        xaxis_title="Year",
-        yaxis_title="Rainfall (mm)"
-    )
-    st.plotly_chart(fig_2d, use_container_width=True)
-
-    # Add explanation of parameters
     st.markdown("""
         <div class='text-area'>
             <h4>Parameters Explanation:</h4>
             <ul>
-                <li><strong>RBF Function:</strong> The type of radial basis function used for interpolation</li>
-                <li><strong>Epsilon:</strong> Shape parameter that affects how local or global the interpolation is</li>
+                <li><strong>AR(p) Parameter:</strong> The number of lag observations included in the model. Higher values can capture more complex patterns.</li>
+                <li><strong>Test Data Size:</strong> The number of data points used for testing the model.</li>
             </ul>
+            <p><em>Note: The model uses differencing (d=1) and moving average (q=1) by default to handle trends and seasonal patterns.</em></p>
         </div>
     """, unsafe_allow_html=True)
 
-def technical_details(datasets):
-    """Technical Analysis Dashboard"""
-    st.title("Technical Analysis Dashboard")
+def create_rbf_interpolation(df):
+    st.subheader("RBF-NN Interpolation")
+    df = df.rename(columns={'Item': 'Crops'})
 
-    # Create tabs for different technical analyses
+    selected_crop = st.selectbox("Select Crop for Interpolation", df['Crops'].unique())
+    x_axis = st.selectbox("Select X-axis Variable", 
+                         ['year', 'average_rain_fall_mm_per_year', 'avg_temp', 'pesticides'])
+    
+    L = st.slider("Select L (Length Scale) Parameter", 0.1, 10.0, 1.0, 0.1)
+    test_size = st.slider("Select Test Data Size (Percentage)", 0.1, 0.9, 0.2, 0.1)
+
+    crop_data = df[df['Crops'] == selected_crop].dropna(subset=[x_axis, 'yield'])
+    x_data = crop_data[x_axis].values
+    y_data = crop_data['yield'].values
+
+    # Sort data
+    sorted_indices = np.argsort(x_data)
+    x_data = x_data[sorted_indices]
+    y_data = y_data[sorted_indices]
+
+    # Split data
+    split_index = int(len(x_data) * (1 - test_size))
+    x_train, x_test = x_data[:split_index], x_data[split_index:]
+    y_train, y_test = y_data[:split_index], y_data[split_index:]
+
+    # RBF calculations
+    X_train = np.array([[np.exp(-((x_i - x_j) ** 2) / (2 * L ** 2)) 
+                         for x_j in x_train] for x_i in x_train])
+    U, S, Vt = np.linalg.svd(X_train)
+    
+    # Compute pseudo-inverse and weights
+    S_inv = np.zeros_like(X_train.T)
+    S_inv[np.where(S > 1e-10)[0], np.where(S > 1e-10)[0]] = 1 / S[S > 1e-10]
+    X_pseudo_inv = Vt.T @ S_inv @ U.T
+    w = X_pseudo_inv @ y_train
+
+    # Prepare prediction data
+    x_actual = np.linspace(x_data.min(), x_data.max(), 200)
+    y_pred = np.array([np.sum([w_c * np.exp(-((x - x_c) ** 2) / (2 * L ** 2)) 
+                              for w_c, x_c in zip(w, x_train)]) for x in x_actual])
+
+    # Fit trend line
+    coeffs = np.polyfit(x_train, y_train, deg=1)
+    trend_line = np.polyval(coeffs, x_actual)
+
+    # Create plot
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=x_train, y=y_train, mode='markers', 
+                            name='Training Data', marker=dict(color='blue')))
+    fig.add_trace(go.Scatter(x=x_test, y=y_test, mode='markers', 
+                            name='Testing Data', marker=dict(color='red')))
+    fig.add_trace(go.Scatter(x=x_actual, y=y_pred, mode='lines', 
+                            name=f'RBF-NN Prediction (L={L})', line=dict(color='green')))
+    fig.add_trace(go.Scatter(x=x_actual, y=trend_line, mode='lines', 
+                            name='Trend Line', line=dict(color='black', dash='dash')))
+
+    fig.update_layout(title=f"RBF-NN Interpolation for {selected_crop}",
+                     xaxis_title=x_axis,
+                     yaxis_title='Yield')
+    st.plotly_chart(fig, use_container_width=True)
+    add_chart_usage_instructions()
+
+    # Parameters explanation
+    st.markdown("""
+        <div class='text-area'>
+            <h4>Parameters Explanation:</h4>
+            <ul>
+                <li><strong>L (Length Scale):</strong> Controls the smoothness of the interpolation. Smaller L makes the interpolation more sensitive to nearby points.</li>
+                <li><strong>X-axis Variable:</strong> The feature used as input to the RBF-NN model.</li>
+                <li><strong>Test Data Size:</strong> Percentage of data used for testing the model.</li>
+            </ul>
+        </div>
+    """, unsafe_allow_html=True)
+        
+def customer_analysis(datasets):
+    st.title("Customer Analysis Dashboard")
+    
+    tabs = st.tabs([
+        "Custom Visualization",
+        "Correlation Analysis",
+        "Geographic Analysis",
+        "PCA Analysis",
+        "ARIMA Forecast",
+        "RBF-NN Interpolation"
+    ])
+
+    agricultural_data = datasets['agricultural']
+
+    with tabs[0]: create_customer_visualization(agricultural_data)
+    with tabs[1]: create_correlation_heatmap(agricultural_data)
+    with tabs[2]: create_geographic_time_series(agricultural_data)
+    with tabs[3]: create_pca_analysis(agricultural_data)
+    with tabs[4]: create_arima_forecast(agricultural_data)
+    with tabs[5]: create_rbf_interpolation(agricultural_data)
+
+def technical_details(datasets):
+    st.title("Technical Analysis Dashboard")
+    
     tech_tabs = st.tabs([
         "Dataset Visualization",
         "Missing Values Analysis",
-        "MICE Comparison"
+        "MICE Imputation and Comparison"
     ])
 
-    with tech_tabs[0]:
-        create_technical_visualization(datasets)
-
-    with tech_tabs[1]:
-        visualize_missing_values(datasets)
-
-    with tech_tabs[2]:
-        compare_mice_results(datasets)
+    with tech_tabs[0]: create_technical_visualization(datasets)
+    with tech_tabs[1]: visualize_missing_values(datasets)
+    with tech_tabs[2]: mice_imputation_and_comparison(datasets)
 
 def create_technical_visualization(datasets):
-    """Create technical visualizations for different datasets with color option"""
     st.subheader("Dataset Visualization")
-
+    
     selected_dataset = st.selectbox("Select Dataset", list(datasets.keys()))
     df = datasets[selected_dataset]
-
-    # Apply column drops for 'yield' and 'pesticides' datasets if not already applied
-    if selected_dataset == 'yield':
-        df = df.drop(columns=["Domain Code", "Domain", "Area Code", "Element Code",
-                              "Item Code", "Element", "Year Code", "Unit"], errors='ignore')
-        df.rename(columns={'Year': 'year', 'Item': 'Crops'}, inplace=True)
-    elif selected_dataset == 'pesticides':
-        df = df.drop(columns=["Domain", "Item", "Element", "Unit"], errors='ignore')
-        df.rename(columns={'Year': 'year'}, inplace=True)
-    else:
-        df.rename(columns={'Year': 'year'}, inplace=True)
 
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -707,182 +665,209 @@ def create_technical_visualization(datasets):
     with col2:
         y_axis = st.selectbox("Select Y-axis", df.columns)
     with col3:
-        color_by = st.selectbox("Color by", [None] + list(df.columns))
+        color_by = st.selectbox("Select Color By", [None] + list(df.columns))
 
-    fig = px.scatter(df, x=x_axis, y=y_axis, color=df[color_by] if color_by else None,
-                     title=f"{selected_dataset}: {y_axis} vs {x_axis}")
-    st.plotly_chart(fig, use_container_width=True)
+    create_visualization_plot(df, x_axis, y_axis, color_by, 
+                            f"{selected_dataset}: {y_axis} vs {x_axis}")
 
 def visualize_missing_values(datasets):
-    """Create missing values visualization using provided format"""
     st.subheader("Missing Values Analysis")
+    
+    datasets_to_plot = {
+        'Yield Data': ('yield', 'yield'),
+        'Pesticide Data': ('pesticides', 'Value'),
+        'Temperature Data': ('temp', 'avg_temp'),
+        'Rainfall Data': ('rainfall', 'average_rain_fall_mm_per_year')
+    }
 
-    # Plot Missing Value Heatmaps
-    st.markdown("### Missing Values Distribution in Yield Data")
-    plot_missing_heatmap(datasets['yield'], 'Value', 'Missing Values Distribution in Yield Data')
+    for title, (dataset_key, value_column) in datasets_to_plot.items():
+        st.markdown(f"### Missing Values Distribution in {title}")
+        plot_missing_heatmap(datasets[dataset_key], value_column, 
+                           f"Missing Values Distribution in {title}")
 
-    st.markdown("### Missing Values Distribution in Pesticide Data")
-    plot_missing_heatmap(datasets['pesticides'], 'Value', 'Missing Values Distribution in Pesticide Data')
-
-    st.markdown("### Missing Values Distribution in Temperature Data")
-    plot_missing_heatmap(datasets['temp'], 'avg_temp', 'Missing Values Distribution in Temperature Data')
-
-    st.markdown("### Missing Values Distribution in Rainfall Data")
-    plot_missing_heatmap(datasets['rainfall'], 'average_rain_fall_mm_per_year', 'Missing Values Distribution in Rainfall Data')
-
-    # Add explanation
     st.markdown("""
-        <div class='text-area'>
+        <div class='text-area' style='text-align: left;'>
             <h4>Missing Values Handling Strategy:</h4>
             <p>
-            The heatmaps above show the distribution of missing values across different areas and years.
+            The heatmaps above show the distribution of missing values across different areas and years (yellow indicates missing values).
+            Missing values handling strategy:
+            <ol>
+                <li>Filter common areas that exist in all datasets and remove other areas.</li>
+                <li>Restrict all datasets to the common year range from 1990 to 2013.</li>
+                <li>Fill the remaining missing values using MICE (Multiple Imputation by Chained Equations).</li>
+            </ol>
             </p>
         </div>
     """, unsafe_allow_html=True)
 
-def compare_mice_results(datasets):
-    """Compare results before and after MICE imputation"""
-    st.subheader("MICE Imputation Comparison")
-
-    # Assuming we have original and MICE-imputed datasets
-    dataset_type = st.selectbox("Select Dataset Type", ["yield", "pesticides"])
-    df_original = datasets.get(dataset_type)
-    df_imputed = datasets.get(f"{dataset_type}_imputed")
-
-    if df_original is None or df_imputed is None:
-        st.error("Cannot find imputed results for the selected dataset.")
-        return
-
-    # Apply column drops if necessary
-    if dataset_type == 'yield':
-        df_original = df_original.drop(columns=["Domain Code", "Domain", "Area Code", "Element Code",
-                                                "Item Code", "Element", "Year Code", "Unit"], errors='ignore')
-        df_imputed = df_imputed.drop(columns=["Domain Code", "Domain", "Area Code", "Element Code",
-                                              "Item Code", "Element", "Year Code", "Unit"], errors='ignore')
-        df_original.rename(columns={'Year': 'year', 'Item': 'Crops'}, inplace=True)
-        df_imputed.rename(columns={'Year': 'year', 'Item': 'Crops'}, inplace=True)
-    elif dataset_type == 'pesticides':
-        df_original = df_original.drop(columns=["Domain", "Item", "Element", "Unit"], errors='ignore')
-        df_imputed = df_imputed.drop(columns=["Domain", "Item", "Element", "Unit"], errors='ignore')
-        df_original.rename(columns={'Year': 'year'}, inplace=True)
-        df_imputed.rename(columns={'Year': 'year'}, inplace=True)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.write("Original Data Distribution")
-        fig1 = px.box(df_original, title="Original Data")
-        st.plotly_chart(fig1)
-
-    with col2:
-        st.write("Imputed Data Distribution")
-        fig2 = px.box(df_imputed, title="Imputed Data")
-        st.plotly_chart(fig2)
-
-# New Functions Provided by User
-def plot_missing_heatmap(df, value_column, title, agg_method='first'):
-    """
-    Create a heatmap visualization of missing values across areas and years.
-
-    Parameters:
-    - df: Input DataFrame
-    - value_column: Column containing the values to analyze
-    - title: Title of the heatmap
-    - agg_method: Method to aggregate duplicate entries (default: 'first')
-    """
-    # Validate input
-    required_columns = ['Area', 'year', value_column]
+def plot_missing_heatmap(df, value_column, title):
+    required_columns = ['year', value_column, 'Area']
     for col in required_columns:
         if col not in df.columns:
             st.error(f"Required column '{col}' not found in the DataFrame")
             return
 
-    # Select relevant columns
     df_subset = df[required_columns].copy()
-
-    # Aggregate duplicates
-    df_subset = df_subset.groupby(['Area', 'year'])[value_column].agg(agg_method).reset_index()
-
-    # Create pivot table
+    df_subset = df_subset.groupby(['Area', 'year'])[value_column].agg('first').reset_index()
     pivot = df_subset.pivot(index='year', columns='Area', values=value_column)
 
-    # Create the plot
     plt.figure(figsize=(20, 10))
-
-    # Generate heatmap of missing values
     sns.heatmap(pivot.isnull(),
-                cbar=False,  # No color bar
-                cmap='plasma',  # Color scheme
+                cbar=False,
+                cmap='plasma',
                 xticklabels=True,
                 yticklabels=True)
 
-    # Customize plot
     plt.title(title, fontsize=16, pad=20)
     plt.xlabel('Area', fontsize=12)
     plt.ylabel('Year', fontsize=12)
-
-    # Rotate x-axis labels for readability
     plt.xticks(rotation=90, ha='right')
 
-    # Adjust y-axis ticks to prevent overcrowding
     num_years = pivot.shape[0]
     y_tick_locations = np.linspace(0, num_years-1, min(20, num_years)).astype(int)
     y_tick_labels = pivot.index[y_tick_locations]
     plt.yticks(y_tick_locations, y_tick_labels)
 
-    # Ensure layout is tight
     plt.tight_layout()
-
-    # Display the plot in Streamlit
     st.pyplot(plt.gcf())
+    plt.clf()
+
+def mice_imputation_and_comparison(datasets):
+    st.subheader("MICE Imputation and Comparison")
+    
+    selected_dataset = st.selectbox("Select Dataset for MICE Imputation", 
+                                  ['yield', 'pesticides'])
+    
+    value_column = 'yield' if selected_dataset == 'yield' else 'Value'
+    df_cleaned = datasets[selected_dataset].copy()
+    analyze_and_impute_data(df_cleaned, value_column, selected_dataset)
+
+def analyze_and_impute_data(original_df, value_column='Value', dataset_name='Dataset'):
+    filled_df = iterative_mice_imputation(original_df, value_column)
+    compare_datasets(original_df, filled_df, value_column, dataset_name)
+
+def iterative_mice_imputation(df, value_column='Value'):
+    pivot_df = df.pivot_table(index='Area', columns='year', 
+                             values=value_column, aggfunc='first')
+    
+    imputer = IterativeImputer(max_iter=10, random_state=42, min_value=0)
+    imputed_values = imputer.fit_transform(pivot_df)
+    
+    imputed_df = pd.DataFrame(
+        imputed_values, 
+        index=pivot_df.index, 
+        columns=pivot_df.columns
+    ).reset_index()
+    
+    imputed_df = imputed_df.melt(id_vars='Area', 
+                                var_name='year', 
+                                value_name=value_column)
+    imputed_df['year'] = imputed_df['year'].astype(int)
+    imputed_df[value_column] = imputed_df[value_column].round()
+    
+    return imputed_df
+
+def compare_datasets(original_df, filled_df, value_column='Value', dataset_name='Dataset'):
+    """
+    Compare datasets before and after imputation with detailed visualizations and statistics.
+    """
+    if value_column not in original_df.columns or value_column not in filled_df.columns:
+        st.error(f"Column '{value_column}' not found in one of the datasets.")
+        return
+
+    # Create subplots
+    fig, axes = plt.subplots(3, 1, figsize=(10, 15))
+
+    # Distribution Plot
+    sns.histplot(data=original_df, x=value_column, bins=50, color='blue', alpha=0.5, label='Before Imputation', stat='density', ax=axes[0])
+    sns.histplot(data=filled_df, x=value_column, bins=50, color='orange', alpha=0.5, label='After Imputation', stat='density', ax=axes[0])
+    axes[0].set_title(f'{dataset_name.capitalize()} Value Distribution Comparison', fontsize=14)
+    axes[0].set_xlabel(value_column)
+    axes[0].set_ylabel('Density')
+    axes[0].legend()
+
+    # Yearly Counts Plot
+    create_yearly_counts_plot(original_df, filled_df, ax=axes[1], dataset_name=dataset_name)
+
+    # Time Trends Plot
+    create_time_trends_plot(original_df, filled_df, value_column=value_column, ax=axes[2], dataset_name=dataset_name)
+
+    plt.tight_layout()
+    st.pyplot(fig)
     plt.clf()  # Clear the figure after displaying
 
-# Diagnostic Function to Check Duplicates
-def diagnose_duplicates(df, columns):
+def create_yearly_counts_plot(original_df, filled_df, ax, dataset_name='Dataset'):
     """
-    Identify and print details about duplicate entries in specified columns.
-
-    Parameters:
-    - df: Input DataFrame
-    - columns: List of columns to check for duplicates
+    Plot yearly data counts comparison.
     """
-    duplicates = df[df.duplicated(subset=columns, keep=False)]
+    original_counts = original_df.groupby('year').size()
+    filled_counts = filled_df.groupby('year').size()
 
-    st.write(f"Total duplicate entries: {len(duplicates)}")
-    st.write("\nDuplicate Entries:")
-    st.write(duplicates)
+    x = np.arange(len(original_counts.index))
+    width = 0.35
 
-    # Groupby to see duplicate patterns
-    duplicate_groups = duplicates.groupby(columns).size().reset_index(name='count')
-    st.write("\nDuplicate Groups:")
-    st.write(duplicate_groups[duplicate_groups['count'] > 1])
+    ax.bar(x - width / 2, original_counts.values, width, label='Before Imputation', color='blue', alpha=0.7)
+    ax.bar(x + width / 2, filled_counts.values, width, label='After Imputation', color='orange', alpha=0.7)
+
+    ax.set_title(f'{dataset_name.capitalize()} Data Counts by Year', fontsize=14)
+    ax.set_xlabel('Year')
+    ax.set_ylabel('Number of Observations')
+    ax.set_xticks(x)
+    ax.set_xticklabels(original_counts.index, rotation=45)
+    ax.legend()
+    ax.grid(True, linestyle='--', alpha=0.7)
+
+def create_time_trends_plot(original_df, filled_df, value_column='Value', ax=None, dataset_name='Dataset'):
+    """
+    Plot time trends comparison.
+    """
+    orig_means = original_df.groupby('year')[value_column].mean().reset_index()
+    filled_means = filled_df.groupby('year')[value_column].mean().reset_index()
+
+    ax.plot(orig_means['year'], orig_means[value_column], marker='o', color='blue', label='Before Imputation Mean')
+    ax.plot(filled_means['year'], filled_means[value_column], marker='s', linestyle='--', color='orange', label='After Imputation Mean')
+    ax.set_title(f'{dataset_name.capitalize()} {value_column} Trends Over Time', fontsize=14)
+    ax.set_xlabel('Year')
+    ax.set_ylabel(value_column)
+    ax.legend()
+    ax.grid(True)
+    ax.yaxis.set_major_formatter(mticker.ScalarFormatter(useMathText=True))
+    plt.tight_layout()
 
 def main():
-    """Main application function"""
-    # Load data
-    datasets = load_data()
-
-    # Load and process background image
-    img_str = load_and_process_bg_image()
-
-    # Apply styling
-    apply_styling(img_str)
-
-    # Sidebar navigation
-    st.sidebar.title("Navigation")
-    section = st.sidebar.radio("Select Section", ["Home", "Customer Analysis", "Technical Details"])
-
-    if section == "Home":
-        show_homepage()
-    elif section == "Customer Analysis":
-        customer_analysis(datasets)
-    elif section == "Technical Details":
-        technical_details(datasets)
-
-if __name__ == "__main__":
     try:
-        main()
+        datasets = load_data()
+        img_str = load_and_process_bg_image()
+        apply_styling(img_str)
+
+        st.sidebar.title("Navigation")
+        section = st.sidebar.radio("Select Section", 
+                                 ["Home", "Customer Analysis", "Technical Details"])
+
+        if 'previous_section' not in st.session_state:
+            st.session_state['previous_section'] = section
+        elif st.session_state['previous_section'] != section:
+            st.session_state['previous_section'] = section
+            st.markdown(
+                """
+                <script>
+                window.scrollTo(0, 0);
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
+
+        if section == "Home":
+            show_homepage(datasets)
+        elif section == "Customer Analysis":
+            customer_analysis(datasets)
+        else:
+            technical_details(datasets)
+
     except Exception as e:
         logging.exception("An error occurred.")
         st.error(f"An error occurred: {str(e)}")
         st.error("Please check the input data and try again.")
+
+if __name__ == "__main__":
+    main()
