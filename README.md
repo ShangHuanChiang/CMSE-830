@@ -7,6 +7,7 @@ CropInsight is a comprehensive web application designed to enhance agricultural 
 - **GitHub Repository**: [https://github.com/ShangHuanChiang/CMSE-830](https://github.com/ShangHuanChiang/CMSE-830)
 - **Data Source**: [https://www.kaggle.com/code/patelris/crop-yield-eda-viz/input](https://www.kaggle.com/code/patelris/crop-yield-eda-viz/input)
 - **Documentation**: [final_project_streamlit.py](https://github.com/ShangHuanChiang/CMSE-830/blob/main/final_project/final_project_streamlit.py)
+- **Streamlit link**:https://cmse-830-5pdmdsgmsvrxysf9vwfmyd.streamlit.app/
 
 ## Data Sources
 The datasets used in this project are sourced from Kaggle's "Crop Yield Prediction" dataset, which includes:
